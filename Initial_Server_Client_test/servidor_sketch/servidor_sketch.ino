@@ -62,7 +62,9 @@ static BLEServer* initBLEDeviceAndServer(const char* deviceName) {
   return server;
 }
 
+
 static void setupCharacteristic(BLEService *service, const char* charUuid) {
+  // Define the Characteristics of GATT atributes
   pCharacteristic = service->createCharacteristic(
     charUuid,
     BLECharacteristic::PROPERTY_WRITE |
