@@ -104,11 +104,8 @@ void loop() {
     doConnect = false;
     delete serverFound;
     serverFound = nullptr;
-
-    if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Sleeping 10 seconds before new scan");
-    delay(10000);
-    BLEDevice::getScan()->start(5, false);
   }
-
-  delay(200);
+  if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Sleeping 10 seconds before new scan");
+  delay(10000);
+  BLEDevice::getScan()->start(5, false);
 }
