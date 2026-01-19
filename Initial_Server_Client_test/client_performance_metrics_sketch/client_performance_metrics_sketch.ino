@@ -19,7 +19,8 @@
 #define ENABLE_ERROR_LOGS true
 
 // Constants for Perfomance Metrics
-#define NUM_ROUNDS 20
+#define NUM_ROUNDS 20+1 // The first round is excluded from the average calculation to 
+                        // ensure a more representative performance measurement.
 #define SCAN_TIME  5
 
 // Global Variables
@@ -62,7 +63,8 @@ void printMetrics() {
   unsigned long minT = ULONG_MAX;
   unsigned long maxT = 0;
 
-  for (int i = 0; i < NUM_ROUNDS; i++) {
+  // Start at 1 to ignore the first round
+  for (int i = 1; i < NUM_ROUNDS; i++) {
     sum += roundTimes[i];
     if (roundTimes[i] < minT) minT = roundTimes[i];
     if (roundTimes[i] > maxT) maxT = roundTimes[i];
@@ -70,11 +72,11 @@ void printMetrics() {
 
   float avg = (float)sum / NUM_ROUNDS;
 
-  Serial.println("\n--- Métricas de Performance BLE ---");
-  Serial.print("Rondas: "); Serial.println(NUM_ROUNDS);
-  Serial.print("Média: "); Serial.print(avg); Serial.println(" ms");
-  Serial.print("Mínimo: "); Serial.print(minT); Serial.println(" ms");
-  Serial.print("Máximo: "); Serial.print(maxT); Serial.println(" ms");
+  Serial.println("\n--- BLE Performance Metrics ---");
+  Serial.print("Rounds: "); Serial.println(NUM_ROUNDS - 1);
+  Serial.print("Average: "); Serial.print(avg); Serial.println(" μs");
+  Serial.print("Minimum: "); Serial.print(minT); Serial.println(" μs");
+  Serial.print("Maximum: "); Serial.print(maxT); Serial.println(" μs");
 }
 
 
@@ -114,7 +116,8 @@ bool connectAndExchange() {
     Serial.println(mensagem.c_str());
   }
   
-  tStart = millis();
+  //tStart = millis();
+  tStart = micros();
 
   pRemoteCharacteristic->writeValue((uint8_t*)mensagem.data(), mensagem.length(), false);
   if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Message Sent");
@@ -125,7 +128,8 @@ bool connectAndExchange() {
     Serial.println(value.c_str());
   }
 
-  tEnd = millis();
+  //tEnd = millis();
+  tEnd = micros();
   pClient->disconnect();
   roundTimes[currentRound] = tEnd - tStart;
 
@@ -153,15 +157,18 @@ void loop() {
   BLEDevice::getScan()->start(SCAN_TIME, false);
 
   if (doConnect && serverFound != nullptr) {
+    // Dont show first round
     if (connectAndExchange()) {
-      Serial.print("Ronda ");
-      Serial.print(currentRound);
-      Serial.print(" tempo: ");
-      Serial.print(roundTimes[currentRound]);
-      Serial.println(" ms");
+      if (currentRound > 0) {
+        Serial.print("Round ");
+        Serial.print(currentRound);
+        Serial.print(" time: ");
+        Serial.print(roundTimes[currentRound]);
+        Serial.println(" μs");
+      }
       currentRound++;
     }
   }
-  if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Sleeping 10 seconds before new scan");
-  delay(2000);
+  //if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Sleeping 10 seconds before new scan");
+  //delay(2000);
 }
