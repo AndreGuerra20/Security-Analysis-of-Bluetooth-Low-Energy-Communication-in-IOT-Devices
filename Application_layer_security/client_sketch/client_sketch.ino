@@ -47,7 +47,7 @@ static const uint8_t AES128_KEY[16] = {
 #define ENABLE_ERROR_LOGS true
 // Set this constant according wich option you want: 1 Request to the Server only temperature readings,
 // 2 Request to the Server only humidity readings, 3 Request to the Server randomly deciding between temperature or humidity readings for each round
-#define REQUEST_OPTION 3
+#define REQUEST_OPTION 1
 
 // Constants for Perfomance Metrics
 #define NUM_ROUNDS 20+1 // The first round is excluded from the average calculation to 
@@ -222,8 +222,8 @@ bool connectAndExchange() {
     return false;
   }
   
-  //tStart = millis();
-  tStart = micros();
+  tStart = millis();
+  //tStart = micros();
 
   if (!sendEncryptedCMD(pRemoteCharacteristic)) {
     return false;
@@ -283,8 +283,8 @@ bool connectAndExchange() {
     }
   }
 
-  //tEnd = millis();
-  tEnd = micros();
+  tEnd = millis();
+  //tEnd = micros();
   pClient->disconnect();
   roundTimes[currentRound] = tEnd - tStart;
 
