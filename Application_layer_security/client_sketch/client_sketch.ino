@@ -8,8 +8,7 @@
 */
 
 // Libraries necessary to AES encryption/decryption
-#include "mbedtls/gcm.h"
-#include "esp_system.h"
+#include "crypto_aes_gcm.h"
 
 static const uint8_t AES128_KEY[16] = {
   0x60,0x3d,0xeb,0x10,0x15,0xca,0x71,0xbe,0x2b,0x73,0xae,0xf0,0x85,0x7d,0x77,0x81
@@ -68,68 +67,6 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     }
   }
 };
-
-static bool aes_gcm_encrypt(
-  const uint8_t *key16,
-  const uint8_t *nonce12,
-  const uint8_t *pt, size_t pt_len,
-  uint8_t *ct,
-  uint8_t *tag16
-) {
-  mbedtls_gcm_context ctx;
-  mbedtls_gcm_init(&ctx);
-
-  int ret = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key16, 128);
-  if (ret != 0) { mbedtls_gcm_free(&ctx); return false; }
-
-  // AAD opcional. Podem meter "BME" ou versão do protocolo.
-  const uint8_t *aad = nullptr;
-  size_t aad_len = 0;
-
-  ret = mbedtls_gcm_crypt_and_tag(
-    &ctx,
-    MBEDTLS_GCM_ENCRYPT,
-    pt_len,
-    nonce12, 12,
-    aad, aad_len,
-    pt,
-    ct,
-    16, tag16
-  );
-
-  mbedtls_gcm_free(&ctx);
-  return (ret == 0);
-}
-
-static bool aes_gcm_decrypt(
-  const uint8_t *key16,
-  const uint8_t *nonce12,
-  const uint8_t *ct, size_t ct_len,
-  const uint8_t *tag16,
-  uint8_t *pt_out
-) {
-  mbedtls_gcm_context ctx;
-  mbedtls_gcm_init(&ctx);
-
-  int ret = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key16, 128);
-  if (ret != 0) { mbedtls_gcm_free(&ctx); return false; }
-
-  const uint8_t *aad = nullptr;
-  size_t aad_len = 0;
-
-  ret = mbedtls_gcm_auth_decrypt(
-    &ctx,
-    ct_len,
-    nonce12, 12,
-    aad, aad_len,
-    tag16, 16,
-    ct,
-    pt_out
-  );
-
-  mbedtls_gcm_free(&ctx);
-  return (ret == 0);
-}
 
 static bool sendEncryptedTemp(BLERemoteCharacteristic *ch) {
   static uint32_t seq = 0;
@@ -255,14 +192,7 @@ bool connectAndExchange() {
 
     uint8_t pt[9];
 
-    bool ok = aes_gcm_decrypt(
-      AES128_KEY,
-      nonce,
-      ct,
-      9,
-      tag,
-      pt
-    );
+    bool ok = aes_gcm_decrypt(AES128_KEY,nonce,ct,9,tag,pt);
 
     if (!ok) {
       if (ENABLE_ERROR_LOGS)

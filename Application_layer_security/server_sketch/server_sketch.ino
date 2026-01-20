@@ -12,8 +12,7 @@
 */
 
 // Libraries necessary to AES encryption
-#include "mbedtls/gcm.h"
-#include "esp_system.h"   // esp_random()
+#include "crypto_aes_gcm.h"
 
 static const uint8_t AES128_KEY[16] = {
   0x60,0x3d,0xeb,0x10,0x15,0xca,0x71,0xbe,0x2b,0x73,0xae,0xf0,0x85,0x7d,0x77,0x81
@@ -45,68 +44,6 @@ Adafruit_BME280 bme;
 BLECharacteristic *pCharacteristic;
 volatile bool deviceConnected = false;
 
-static bool aes_gcm_encrypt(
-  const uint8_t *key16,
-  const uint8_t *nonce12,
-  const uint8_t *pt, size_t pt_len,
-  uint8_t *ct,
-  uint8_t *tag16
-) {
-  mbedtls_gcm_context ctx;
-  mbedtls_gcm_init(&ctx);
-
-  int ret = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key16, 128);
-  if (ret != 0) { mbedtls_gcm_free(&ctx); return false; }
-
-  // AAD opcional. Podem meter "BME" ou versão do protocolo.
-  const uint8_t *aad = nullptr;
-  size_t aad_len = 0;
-
-  ret = mbedtls_gcm_crypt_and_tag(
-    &ctx,
-    MBEDTLS_GCM_ENCRYPT,
-    pt_len,
-    nonce12, 12,
-    aad, aad_len,
-    pt,
-    ct,
-    16, tag16
-  );
-
-  mbedtls_gcm_free(&ctx);
-  return (ret == 0);
-}
-
-static bool aes_gcm_decrypt(
-  const uint8_t *key16,
-  const uint8_t *nonce12,
-  const uint8_t *ct, size_t ct_len,
-  const uint8_t *tag16,
-  uint8_t *pt_out
-) {
-  mbedtls_gcm_context ctx;
-  mbedtls_gcm_init(&ctx);
-
-  int ret = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key16, 128);
-  if (ret != 0) { mbedtls_gcm_free(&ctx); return false; }
-
-  const uint8_t *aad = nullptr;
-  size_t aad_len = 0;
-
-  ret = mbedtls_gcm_auth_decrypt(
-    &ctx,
-    ct_len,
-    nonce12, 12,
-    aad, aad_len,
-    tag16, 16,
-    ct,
-    pt_out
-  );
-
-  mbedtls_gcm_free(&ctx);
-  return (ret == 0);
-}
-
 class ServerCallbacks : public BLEServerCallbacks {
   // Override the default methods
   void onConnect(BLEServer* pServer) override {
@@ -126,26 +63,30 @@ class CharCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pChar) override {
     String v = pChar->getValue();
     size_t len = v.length();
-    if (len < (12 + 8 + 16)) {
+
+    const size_t CMD_CT_LEN = 8; // 4 bytes "TEMP" + 4 bytes seq
+    const size_t MIN_LEN = AES_GCM_IV_SIZE + CMD_CT_LEN + AES_GCM_TAG_SIZE;
+
+    if (len < MIN_LEN) {
       if (ENABLE_ERROR_LOGS)
-        Serial.println("[ERROR] RX too small for encrypted TEMP");
+        Serial.println("[ERROR] RX too small for encrypted CMD");
       return;
     }
 
     const uint8_t *buf = (const uint8_t *)v.c_str();
 
-    const uint8_t *nonce = buf;        // 12 bytes
-    const uint8_t *ct    = buf + 12;   // 8 bytes
-    const uint8_t *tag   = buf + 12 + 8;
+    const uint8_t* nonce = buf;                              // 12 bytes
+    const uint8_t* ct    = buf + AES_GCM_IV_SIZE;            // 8 bytes
+    const uint8_t* tag   = buf + AES_GCM_IV_SIZE + CMD_CT_LEN; // 16 bytes
 
-    uint8_t pt[8];
+    uint8_t pt_cmd[CMD_CT_LEN];
     bool ok = aes_gcm_decrypt(
       AES128_KEY,
       nonce,
       ct,
-      8,
+      CMD_CT_LEN,
       tag,
-      pt
+      pt_cmd
     );
 
     if (!ok) {
@@ -155,14 +96,14 @@ class CharCallbacks : public BLECharacteristicCallbacks {
     }
 
     char cmd[5];
-    cmd[0] = (char)pt[0];
-    cmd[1] = (char)pt[1];
-    cmd[2] = (char)pt[2];
-    cmd[3] = (char)pt[3];
+    cmd[0] = (char)pt_cmd[0];
+    cmd[1] = (char)pt_cmd[1];
+    cmd[2] = (char)pt_cmd[2];
+    cmd[3] = (char)pt_cmd[3];
     cmd[4] = '\0';
 
     uint32_t seq;
-    memcpy(&seq, &pt[4], 4);
+    memcpy(&seq, &pt_cmd[4], 4);
 
     if (ENABLE_INFORMATION_LOGS) {
       Serial.print("[INFO] Decrypted CMD=");
