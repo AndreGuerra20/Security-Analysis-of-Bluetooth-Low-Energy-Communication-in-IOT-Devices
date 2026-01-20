@@ -1,6 +1,6 @@
 /* ESP32 BLE Client (Performance Test)
    Scans for BLE peripherals advertising SERVICE_UUID and connects to the first match.
-   For each round, it writes the command "TEMP" to CHARACTERISTIC_UUID, then reads back
+   For each round, it writes the command "TEMP" or "HUMD" to CHARACTERISTIC_UUID, then reads back
    the server response (expected to be a UTF-8 string, e.g., a temperature value).
    The elapsed time between write and read is measured in microseconds and stored.
    After NUM_ROUNDS rounds, it prints average, min, and max metrics, ignoring the first
@@ -113,7 +113,7 @@ bool connectAndExchange() {
   }
 
   // Write the message TEMP to the Server (UTF-8 string)
-  std::string mensagem = "HUM";
+  std::string mensagem = "HUMD";
   if (ENABLE_INFORMATION_LOGS){
     Serial.print("[INFO] Sending: ");
     Serial.println(mensagem.c_str());

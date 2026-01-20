@@ -5,7 +5,7 @@
    When a client writes a command to the characteristic:
    - "TEMP": reads temperature from the BME280 sensor, formats it as a UTF-8 string
              (e.g., "19.64"), stores it in the characteristic value, and sends it via NOTIFY.
-   - "HUM":  reads humidity from the BME280 sensor and replies in the same way.
+   - "HUMD":  reads humidity from the BME280 sensor and replies in the same way.
 
    The server automatically restarts advertising after a client disconnects, allowing
    multiple sequential client connections. A periodic heartbeat log is printed every 5 seconds.
@@ -72,7 +72,7 @@ class CharCallbacks : public BLECharacteristicCallbacks {
       pChar->setValue((uint8_t*)buffer, strlen(buffer));
       pChar->notify();
     }
-    if (rx == "HUM") {
+    if (rx == "HUMD") {
       float humidity = bme.readHumidity();
       if(ENABLE_INFORMATION_LOGS) {
         Serial.print("[INFO] Sending: ");
