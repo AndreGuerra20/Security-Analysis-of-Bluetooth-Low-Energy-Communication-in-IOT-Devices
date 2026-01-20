@@ -14,6 +14,7 @@ float readTemperatureBME280() {
 void setup() {
   Serial.begin(115200);
 
+  // Initialize the I2C bus
   Wire.begin(I2C_SDA, I2C_SCL);
 
   bool status = bme.begin(0x76); // Try 0x77 if not working
