@@ -92,52 +92,22 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 static bool sendEncryptedCMD(BLERemoteCharacteristic *ch) {
   static uint32_t seq = 0;
   uint8_t pt[8];
-  if (REQUEST_OPTION == 1){
-    // plaintext: "TEMP" + seq
-    pt[0] = 'T'; pt[1] = 'E'; pt[2] = 'M'; pt[3] = 'P';
-    memcpy(&pt[4], &seq, 4);
+  
+  const char* cmd = nullptr;
+  switch (REQUEST_OPTION) {
+    case 1: cmd = "TEMP"; break;
+    case 2: cmd = "HUMD"; break;
+    case 3: cmd = (esp_random() & 1) ? "TEMP" : "HUMD"; break;
+    default: cmd = "TEMP"; break; // fallback safe default
+  }
 
-    // Write the message TEMP to the Server (UTF-8 string)
-    std::string mensagem = "TEMP";
-    if (ENABLE_INFORMATION_LOGS){
-      Serial.print("[INFO] Sending: ");
-      Serial.println(mensagem.c_str());
-    }
-  } else if (REQUEST_OPTION == 2) {
-    // plaintext: "HUMD" + seq
-    pt[0] = 'H'; pt[1] = 'U'; pt[2] = 'M'; pt[3] = 'D';
-    memcpy(&pt[4], &seq, 4);
+  // plaintext: cmd (4 bytes) + seq (4 bytes)
+  memcpy(&pt[0], cmd, 4);
+  memcpy(&pt[4], &seq, sizeof(seq));
 
-    // Write the message HUMD to the Server (UTF-8 string)
-    std::string mensagem = "HUMD";
-    if (ENABLE_INFORMATION_LOGS){
-      Serial.print("[INFO] Sending: ");
-      Serial.println(mensagem.c_str());
-    }
-  } else if (REQUEST_OPTION == 3) {
-    if (esp_random() % 2){
-      // plaintext: "TEMP" + seq
-      pt[0] = 'T'; pt[1] = 'E'; pt[2] = 'M'; pt[3] = 'P';
-      memcpy(&pt[4], &seq, 4);
-
-      // Write the message TEMP to the Server (UTF-8 string)
-      std::string mensagem = "TEMP";
-      if (ENABLE_INFORMATION_LOGS){
-        Serial.print("[INFO] Sending: ");
-        Serial.println(mensagem.c_str());
-      }
-    } else {
-      // plaintext: "HUMD" + seq
-      pt[0] = 'H'; pt[1] = 'U'; pt[2] = 'M'; pt[3] = 'D';
-      memcpy(&pt[4], &seq, 4);
-
-      // Write the message HUMD to the Server (UTF-8 string)
-      std::string mensagem = "HUMD";
-      if (ENABLE_INFORMATION_LOGS){
-        Serial.print("[INFO] Sending: ");
-        Serial.println(mensagem.c_str());
-      }
-    }
+  if (ENABLE_INFORMATION_LOGS) {
+    Serial.print("[INFO] Sending: ");
+    Serial.println(cmd);
   }
 
   // nonce - 12 random bytes -> 3 random unsigned integers
@@ -301,7 +271,7 @@ void setup() {
   if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Initializing BLE Client...");
 
   BLEDevice::init("BLE_Client_Test");
-  BLEDevice::setMTU(100);
+  BLEDevice::setMTU(37);
   BLEScan* pBLEScan = BLEDevice::getScan();
   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   pBLEScan->setActiveScan(true);

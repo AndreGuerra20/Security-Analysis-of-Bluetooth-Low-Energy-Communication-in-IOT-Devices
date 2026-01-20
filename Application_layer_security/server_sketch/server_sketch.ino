@@ -223,7 +223,7 @@ class CharCallbacks : public BLECharacteristicCallbacks {
 static BLEServer* initBLEDeviceAndServer(const char* deviceName) {
   if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Initialising BLE Server...");
   BLEDevice::init(deviceName);
-  BLEDevice::setMTU(100); // Increase Maximum Transmit Unit because of encryption
+  BLEDevice::setMTU(37); // Increase Maximum Transmit Unit because of encryption
 
   BLEServer *server = BLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
