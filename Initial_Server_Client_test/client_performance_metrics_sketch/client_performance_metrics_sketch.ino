@@ -1,7 +1,11 @@
-/* ESP32 BLE Client
-   Scans for BLE devices that advertise the SERVICE_UUID.
-   When one is found, it connects to the server and writes "Hello World!"
-   to the CHARACTERISTIC_UUID. Then it waits 5 seconds and scans again.
+/* ESP32 BLE Client (Request/Response Performance Evaluation)
+   Scans for BLE peripherals advertising SERVICE_UUID and connects to the first device found.
+   In each round, the client establishes a connection, writes a UTF-8 command string
+   ("Hello World!") to CHARACTERISTIC_UUID, and immediately reads back the server response.
+   The elapsed time between the write operation and the corresponding read is measured
+   in microseconds and stored per round.
+   After NUM_ROUNDS iterations, the client computes and prints performance metrics.
+   The first round is excluded from the average calculation to minimize the impact of connection warm-up effects.
 */
 
 #include <BLEDevice.h>
