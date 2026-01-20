@@ -13,8 +13,8 @@
 #include <BLEAdvertisedDevice.h>
 #include <BLEClient.h>
 
-#define SERVICE_UUID        "583a4873-0bef-4f1f-807d-9a33868e213f"
-#define CHARACTERISTIC_UUID "7807a0e0-d39f-4f1e-8e2e-83d62f4ac064"
+#define SERVICE_UUID        "dc1480ed-8d8f-4435-b083-c3c08f586a5e"
+#define CHARACTERISTIC_UUID "19e6651d-68e6-4090-85bb-6c5a3bdcd858"
 
 // Set this constant to true if you want [INFO] logs, otherwise set to false
 #define ENABLE_INFORMATION_LOGS true
