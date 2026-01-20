@@ -1,67 +1,155 @@
-# ESP32 BLE Client–Server Code Overview
+# ESP32 BLE Client–Server Code Overview (Application-Layer Security)
 
-This document describes the final BLE client and server implementation used in the project **Secure Communications with BLE in IoT Devices**. The code targets the ESP32 platform using the Arduino framework and the classic ESP32 BLE stack, namely `BLEDevice`, `BLEUtils`, `BLEServer`, and `BLEClient`.
+This document describes the purpose, architecture, and behavior of the Arduino sketches and cryptographic helper files used in the BLE experimentation setup. The system is based on ESP32 devices and focuses on BLE communication, secure request/response exchange, performance measurement, and application-layer encryption.
 
----
-
-## client_sketch.ino
-
-The BLE client acts as both a performance evaluation tool and a secure communication endpoint. Its main responsibilities are:
-
-- Scanning for nearby BLE peripherals advertising the predefined `SERVICE_UUID`.
-- Connecting to the first BLE server that matches the advertised service.
-- Executing a fixed number of communication rounds, defined by a constant.
-- In each round, sending an application-layer command, such as `TEMP`, encrypted with AES-GCM.
-- Waiting for the encrypted response from the server and decrypting it.
-- Measuring the elapsed time between sending the request and receiving the response.
-- Storing timing values for each round and computing performance metrics, including average, minimum, and maximum latency, while ignoring the first round to reduce warm-up effects.
-
-From a security perspective, the client never transmits commands in plaintext. All application data is protected using AES-GCM, ensuring confidentiality, integrity, and authenticity independently of BLE pairing or bonding mechanisms.
-
-The client code is organized to clearly separate:
-- BLE discovery, connection, and reconnection logic.
-- Secure message construction and encryption.
-- Performance measurement, metric aggregation, and reporting.
+The implementation uses the ESP32 BLE Arduino stack (BLEDevice, BLEServer, BLEClient, BLEUtils, BLEScan) and mbedTLS for AES-GCM.
 
 ---
 
-## server_sketch.ino
+## BLE Security Configuration
 
-The BLE server runs on an ESP32 device equipped with a BME280 environmental sensor. Its responsibilities include:
+At the BLE link layer, the system operates under Bluetooth LE Security Mode 1, Level 1.
 
-- Advertising a custom BLE service identified by `SERVICE_UUID`.
-- Exposing a characteristic identified by `CHARACTERISTIC_UUID` for bidirectional communication.
-- Handling client connections and disconnections.
-- Receiving encrypted data through characteristic write events.
-- Decrypting and authenticating incoming messages using AES-GCM.
-- Validating commands and processing only authenticated requests.
-- Reading sensor data, such as temperature or humidity, from the BME280.
-- Encrypting the response and sending it back to the client via the same characteristic.
+**LE Security Mode 1 – Level 1**
+- No BLE link-layer security
+- No authentication
+- No encryption
 
-If message authentication fails, the server discards the request and does not perform any action. This approach mitigates common BLE threats, including unauthorized command injection, replay attempts, and message tampering.
+This means that:
+- BLE packets are transmitted without link-layer encryption.
+- No pairing or bonding procedure is enforced.
+- Any nearby device that knows the Service and Characteristic UUIDs can attempt to interact with the GATT server.
 
----
+To secure the exchanged data despite this baseline BLE configuration, the implementation applies **application-layer authenticated encryption** using **AES-128-GCM**:
+- Confidentiality: payload contents are encrypted.
+- Integrity and authenticity: payloads are authenticated using the GCM tag.
+- Basic replay resistance: sequence numbers are included inside the plaintext.
 
-## crypto_aes_gcm.h / crypto_aes_gcm.cpp
-
-These files implement the cryptographic support layer shared by both the client and the server. Their responsibilities include:
-
-- AES-GCM encryption of application-layer payloads.
-- AES-GCM decryption with authentication tag verification.
-- Definition and handling of the message layout, including nonce (IV), ciphertext, and authentication tag.
-- Encapsulation of cryptographic logic to avoid duplication and reduce implementation errors.
-
-Keeping cryptographic functionality isolated in dedicated source files improves code readability, maintainability, and security auditing.
+This design enables controlled comparison between plaintext BLE traffic and secure application-layer traffic, without depending on BLE pairing modes.
 
 ---
 
-## Summary
+## 1. `server_sketch.ino`  
+### ESP32 BLE Server (Secure BME280 Request/Response)
 
-Together, the client and server sketches form a complete prototype for secure BLE communication in IoT devices, featuring:
+### Purpose
+This sketch implements a BLE server on an ESP32 that advertises a custom service and characteristic, receives encrypted commands from a client, decrypts and validates them, reads data from a BME280 sensor, then encrypts and returns the response to the client.
 
-- Application-layer encryption and authentication using AES-GCM.
-- Secure command and sensor data exchange over BLE.
-- Quantitative performance evaluation of secure BLE message exchanges.
-- A modular design that cleanly separates communication, cryptography, and application logic.
+### Main Features
+- Initializes the ESP32 as a BLE server and starts advertising a custom Service UUID.
+- Exposes a GATT characteristic with READ, WRITE, WRITE_NR, and NOTIFY properties.
+- Receives encrypted requests via characteristic writes.
+- Decrypts and authenticates received payloads with AES-GCM.
+- Reads real sensor values from a BME280 (temperature and humidity).
+- Encrypts and notifies the client with the corresponding encrypted response.
+- Restarts advertising after client disconnection and prints a periodic heartbeat.
 
-This implementation serves as the experimental foundation for analyzing the security, performance, and practical trade-offs of securing BLE communications in real-world IoT environments.
+### Functional Behavior
+1. Initializes Serial, I2C, and the BME280 sensor.
+2. Initializes BLE stack, server, service, and characteristic.
+3. Starts advertising and waits for client connections.
+4. On characteristic write:
+   - Validates minimum payload length.
+   - Parses the incoming buffer as:
+     - nonce (12 bytes) + ciphertext (8 bytes) + tag (16 bytes)
+   - Decrypts and verifies AES-GCM tag.
+   - Extracts plaintext command:
+     - 4-byte ASCII command ("TEMP" or "HUMD") + 4-byte sequence number.
+   - If valid:
+     - Reads temperature or humidity.
+     - Builds a binary plaintext response:
+       - type (1 byte: 0x01 TEMP, 0x02 HUMD) + value (float, 4 bytes) + seq (uint32, 4 bytes)
+     - Encrypts with AES-GCM using a fresh nonce.
+     - Writes encrypted payload to the characteristic and sends it via NOTIFY.
+5. Prints a heartbeat message every 5 seconds indicating connection state.
+
+### Use Case
+This server sketch is the controlled secure endpoint used to evaluate confidentiality/integrity at the application layer and the impact of encryption on latency when exchanging real sensor data.
+
+---
+
+## 2. `client_sketch.ino`  
+### ESP32 BLE Client (Secure Performance Test)
+
+### Purpose
+This sketch implements a BLE client that repeatedly scans for a server advertising a target Service UUID, connects, sends an encrypted command requesting temperature or humidity, reads the encrypted response, decrypts and validates it, and measures round-trip latency.
+
+### Main Features
+- Active BLE scanning with filtering by Service UUID.
+- Connects to the first matching BLE server found.
+- Encrypts requests using AES-128-GCM at the application layer.
+- Reads encrypted responses, verifies the authentication tag, and decrypts payloads.
+- Runs multiple rounds and reports performance metrics (average, min, max), ignoring the first round.
+
+### Functional Behavior
+1. Repeats for a fixed number of rounds (NUM_ROUNDS):
+   - Starts BLE scan for a fixed duration (SCAN_TIME).
+   - Stops scan as soon as a device advertising the target service is found.
+2. Connects to the server, locates the service and characteristic.
+3. Builds a plaintext command (8 bytes):
+   - "TEMP" or "HUMD" (4 bytes) + sequence number (4 bytes).
+4. Generates a fresh 12-byte nonce and encrypts the command using AES-GCM.
+5. Sends the encrypted request as:
+   - nonce (12 bytes) + ciphertext (8 bytes) + tag (16 bytes)
+6. Reads the encrypted response from the characteristic and parses it as:
+   - nonce (12 bytes) + ciphertext (9 bytes) + tag (16 bytes)
+7. Decrypts and validates the response:
+   - type (1 byte) + float value (4 bytes) + seq (4 bytes)
+8. Measures elapsed time in microseconds between sending the request and reading/decrypting the response.
+9. After all rounds, prints average, minimum, and maximum latency metrics (first round excluded from printing to reduce warm-up effects).
+
+### Use Case
+This sketch provides repeatable latency measurements for secure request/response exchanges, enabling comparison against plaintext BLE baselines and evaluation of overhead introduced by application-layer AES-GCM.
+
+---
+
+## 3. `crypto_aes_gcm.cpp`  
+### AES-128-GCM Implementation (mbedTLS)
+
+### Purpose
+This file provides the implementation of AES-GCM authenticated encryption and decryption using the ESP32 mbedTLS library.
+
+### Main Features
+- Implements `aes_gcm_encrypt()`:
+  - Initializes an mbedTLS GCM context.
+  - Configures AES-128 key.
+  - Encrypts plaintext and generates a 16-byte authentication tag.
+- Implements `aes_gcm_decrypt()`:
+  - Initializes an mbedTLS GCM context.
+  - Configures AES-128 key.
+  - Authenticates and decrypts ciphertext.
+  - Returns failure if the authentication tag is invalid.
+
+### Notes
+- No Additional Authenticated Data (AAD) is used (AAD length is 0).
+- The IV/nonce size is fixed to 12 bytes (recommended size for GCM).
+
+---
+
+## 4. `crypto_aes_gcm.h`  
+### AES-128-GCM Interface and Constants
+
+### Purpose
+This header defines AES-GCM constants and exposes a minimal cryptographic interface shared by both client and server sketches.
+
+### Main Features
+- Defines typical AES-GCM sizes:
+  - Key size: 16 bytes (128-bit)
+  - IV/nonce size: 12 bytes
+  - Tag size: 16 bytes
+- Declares:
+  - `aes_gcm_encrypt(...)`
+  - `aes_gcm_decrypt(...)`
+
+---
+
+## Overall Architecture Summary
+
+- Server  
+  Advertises a BLE service, accepts encrypted write requests, decrypts and validates commands, reads BME280 values, encrypts responses, and notifies the client.
+
+- Client  
+  Discovers the server, connects, sends encrypted commands (TEMP/HUMD), reads encrypted responses, decrypts them, and measures round-trip latency over multiple rounds.
+
+- Security Model  
+  BLE link-layer security remains disabled (Mode 1 Level 1) to serve as a baseline, while confidentiality and integrity are enforced at the application layer using AES-128-GCM.
