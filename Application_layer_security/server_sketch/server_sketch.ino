@@ -1,21 +1,45 @@
-/* ESP32 BLE Server (BME280 Request/Response)
+/* ESP32 BLE Server (Secure BME280 Request/Response)
    Advertises SERVICE_UUID and exposes a GATT characteristic (CHARACTERISTIC_UUID)
    with READ, WRITE, WRITE_NR, and NOTIFY properties.
 
-   When a client writes a command to the characteristic:
-   - "TEMP": reads temperature from the BME280 sensor, formats it as a UTF-8 string
-             (e.g., "19.64"), stores it in the characteristic value, and sends it via NOTIFY.
-   - "HUM":  reads humidity from the BME280 sensor and replies in the same way.
+   The server implements an application-layer secure request/response model using
+   AES-GCM. All incoming commands are expected to be encrypted and authenticated,
+   ensuring confidentiality, integrity, and authenticity independently of BLE
+   pairing or bonding mechanisms.
 
-   The server automatically restarts advertising after a client disconnects, allowing
-   multiple sequential client connections. A periodic heartbeat log is printed every 5 seconds.
+   When a client writes an encrypted command to the characteristic:
+   - The server extracts the nonce, ciphertext, and authentication tag.
+   - The command is decrypted and verified using AES-GCM.
+   - Only authenticated commands are processed. Invalid messages are discarded.
+
+   Supported commands include:
+   - "TEMP": reads temperature from the BME280 sensor.
+   - "HUMD": reads humidity from the BME280 sensor.
+
+   For valid requests, the server builds a binary response containing:
+   - A one-byte type identifier (TEMP or HUMD).
+   - The sensor value encoded as a float.
+   - A sequence number for basic replay tracking.
+
+   The response is encrypted and authenticated with AES-GCM using a fresh nonce,
+   written back to the characteristic, and transmitted to the client via NOTIFY.
+
+   The server automatically restarts advertising after a client disconnects,
+   allowing multiple sequential client connections without manual intervention.
+   A periodic heartbeat message is printed every 5 seconds to indicate liveness
+   and connection status.
+
+   This server is intended to evaluate secure application-layer BLE communication
+   with real sensor data on ESP32-based IoT devices.
 */
 
 // Libraries necessary to AES encryption
 #include "crypto_aes_gcm.h"
 
+// AES Key: 4c7d9c0c22fa2cb06517f037b84996f2
 static const uint8_t AES128_KEY[16] = {
-  0x60,0x3d,0xeb,0x10,0x15,0xca,0x71,0xbe,0x2b,0x73,0xae,0xf0,0x85,0x7d,0x77,0x81
+    0x4c, 0x7d, 0x9c, 0x0c, 0x22, 0xfa, 0x2c, 0xb0,
+    0x65, 0x17, 0xf0, 0x37, 0xb8, 0x49, 0x96, 0xf2
 };
 
 // Libraries necessary to BME280 Sensor
@@ -61,33 +85,32 @@ class ServerCallbacks : public BLEServerCallbacks {
 class CharCallbacks : public BLECharacteristicCallbacks {
   // Override the default method
   void onWrite(BLECharacteristic *pChar) override {
-    String v = pChar->getValue();
-    size_t len = v.length();
+    String cmd_rcv = pChar->getValue();
+    size_t len = cmd_rcv.length();
 
-    const size_t CMD_CT_LEN = 8; // 4 bytes "TEMP" + 4 bytes seq
-    const size_t MIN_LEN = AES_GCM_IV_SIZE + CMD_CT_LEN + AES_GCM_TAG_SIZE;
+    const size_t CMD_CT_LEN = 8; // Command Cypher Text length = 4 bytes "TEMP" + 4 bytes seq
+    const size_t MIN_LEN = AES_GCM_IV_SIZE + CMD_CT_LEN + AES_GCM_TAG_SIZE; // Minimum Length
 
     if (len < MIN_LEN) {
       if (ENABLE_ERROR_LOGS)
-        Serial.println("[ERROR] RX too small for encrypted CMD");
+        Serial.println("[ERROR] Encrypted payload received too small");
       return;
     }
 
-    const uint8_t *buf = (const uint8_t *)v.c_str();
+    // Convert string into bytes (Get a pointer to the raw byte buffer)
+    const uint8_t *buf = (const uint8_t *)cmd_rcv.c_str();
 
+    // The first 12 bytes of the payload correspond to the AES-GCM nonce (IV).
     const uint8_t* nonce = buf;                              // 12 bytes
-    const uint8_t* ct    = buf + AES_GCM_IV_SIZE;            // 8 bytes
-    const uint8_t* tag   = buf + AES_GCM_IV_SIZE + CMD_CT_LEN; // 16 bytes
 
-    uint8_t pt_cmd[CMD_CT_LEN];
-    bool ok = aes_gcm_decrypt(
-      AES128_KEY,
-      nonce,
-      ct,
-      CMD_CT_LEN,
-      tag,
-      pt_cmd
-    );
+    // The ciphertext starts immediately after the nonce.
+    const uint8_t* ct = buf + AES_GCM_IV_SIZE;            // 8 bytes
+
+    // The authentication tag is located after the nonce and the ciphertext.
+    const uint8_t* tag = buf + AES_GCM_IV_SIZE + CMD_CT_LEN; // 16 bytes
+
+    uint8_t pt_cmd[CMD_CT_LEN]; // Plain text command received
+    bool ok = aes_gcm_decrypt(AES128_KEY,nonce,ct,CMD_CT_LEN,tag,pt_cmd); // Decrypt cypher text storing plain text in pt_cmd
 
     if (!ok) {
       if (ENABLE_ERROR_LOGS)
@@ -95,11 +118,12 @@ class CharCallbacks : public BLECharacteristicCallbacks {
       return;
     }
 
-    char cmd[5];
-    cmd[0] = (char)pt_cmd[0];
-    cmd[1] = (char)pt_cmd[1];
-    cmd[2] = (char)pt_cmd[2];
-    cmd[3] = (char)pt_cmd[3];
+    //Convert from bytes to usable String
+    char cmd[5]; 
+    cmd[0] = (char)pt_cmd[0]; 
+    cmd[1] = (char)pt_cmd[1]; 
+    cmd[2] = (char)pt_cmd[2]; 
+    cmd[3] = (char)pt_cmd[3]; 
     cmd[4] = '\0';
 
     uint32_t seq;
@@ -114,25 +138,25 @@ class CharCallbacks : public BLECharacteristicCallbacks {
 
     if (strcmp(cmd, "TEMP") == 0) {
       float temperature = bme.readTemperature();
-
-      // plaintext: [type(1)] [float(4)] [seq(4)]
       static uint32_t seq = 0;
-      uint8_t pt[1 + 4 + 4];
+
+      uint8_t pt[1 + 4 + 4]; // plaintext (pt): [type(1)] [float(4)] [seq(4)]
       pt[0] = 0x01; // TEMP
       memcpy(&pt[1], &temperature, 4);
       memcpy(&pt[5], &seq, 4);
 
-      // nonce 12 bytes (4 random + 8 bytes com seq e padding)
+      // nonce 12 bytes (4 random + 8 bytes with seq and padding)
       uint8_t nonce[12];
       uint32_t r = esp_random();
-      memcpy(&nonce[0], &r, 4);
-      memcpy(&nonce[4], &seq, 4);
+      memcpy(&nonce[0], &r, 4); // 4 random bytes
+      memcpy(&nonce[4], &seq, 4); // 4 sequence bytes
       uint32_t z = 0;
-      memcpy(&nonce[8], &z, 4);
+      memcpy(&nonce[8], &z, 4); // 4 padding bytes
 
-      uint8_t ct[sizeof(pt)];
+      uint8_t ct[sizeof(pt)]; // Cypher text
       uint8_t tag[16];
 
+      // Encrypt plain text (pt), storing the result in ct array
       if (!aes_gcm_encrypt(AES128_KEY, nonce, pt, sizeof(pt), ct, tag)) {
         if (ENABLE_ERROR_LOGS) Serial.println("[ERROR] AES-GCM encrypt failed");
         return;
@@ -152,18 +176,46 @@ class CharCallbacks : public BLECharacteristicCallbacks {
         Serial.println(sizeof(out));
       }
       seq++;
-    }
-    if (strcmp(cmd, "HUM") == 0) {
+    } else if (strcmp(cmd, "HUMD") == 0) {
       float humidity = bme.readHumidity();
-      if(ENABLE_INFORMATION_LOGS) {
-        Serial.print("[INFO] Sending: ");
-        Serial.println(humidity);
-      } 
-      //Respond to the client by notify
-      char buffer[16];
-      snprintf(buffer, sizeof(buffer), "%.2f", humidity);
-      pChar->setValue((uint8_t*)buffer, strlen(buffer));
+      static uint32_t seq = 0;
+
+      uint8_t pt[1 + 4 + 4]; // plaintext (pt): [type(1)] [float(4)] [seq(4)]
+      pt[0] = 0x02; // HUMD
+      memcpy(&pt[1], &humidity, 4);
+      memcpy(&pt[5], &seq, 4);
+
+      // nonce 12 bytes (4 random + 8 bytes with seq and padding)
+      uint8_t nonce[12];
+      uint32_t r = esp_random();
+      memcpy(&nonce[0], &r, 4); // 4 random bytes
+      memcpy(&nonce[4], &seq, 4); // 4 sequence bytes
+      uint32_t z = 0;
+      memcpy(&nonce[8], &z, 4); // 4 padding bytes
+
+      uint8_t ct[sizeof(pt)]; // Cypher text
+      uint8_t tag[16];
+
+      // Encrypt plain text (pt), storing the result in ct vector
+      if (!aes_gcm_encrypt(AES128_KEY, nonce, pt, sizeof(pt), ct, tag)) {
+        if (ENABLE_ERROR_LOGS) Serial.println("[ERROR] AES-GCM encrypt failed");
+        return;
+      }
+
+      // payload = nonce(12) + ct(9) + tag(16)
+      uint8_t out[12 + sizeof(ct) + 16];
+      memcpy(out, nonce, 12);
+      memcpy(out + 12, ct, sizeof(ct));
+      memcpy(out + 12 + sizeof(ct), tag, 16);
+
+      pChar->setValue(out, sizeof(out));
       pChar->notify();
+
+      if (ENABLE_INFORMATION_LOGS) {
+        Serial.print("[INFO] Sent encrypted HUMD. Bytes=");
+        Serial.println(sizeof(out));
+      }
+      seq++;
     }
   }
 };
@@ -212,7 +264,7 @@ void setup() {
   Wire.begin(I2C_SDA, I2C_SCL); 
   bool status = bme.begin(0x76); // Try 0x77 if not working
   if (!status) {
-    if (ENABLE_ERROR_LOGS) Serial.println("[Error] BME280 not found");
+    if (ENABLE_ERROR_LOGS) Serial.println("[Error] BME280 not found, restart the device or change bme.begin(address)");
     while (true);
   }
   if (ENABLE_INFORMATION_LOGS) Serial.println("[INFO] BME280 successfully initialized");

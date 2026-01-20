@@ -1,17 +1,35 @@
-/* ESP32 BLE Client (Performance Test)
-   Scans for BLE peripherals advertising SERVICE_UUID and connects to the first match.
-   For each round, it writes the command "TEMP" to CHARACTERISTIC_UUID, then reads back
-   the server response (expected to be a UTF-8 string, e.g., a temperature value).
-   The elapsed time between write and read is measured in microseconds and stored.
-   After NUM_ROUNDS rounds, it prints average, min, and max metrics, ignoring the first
-   round to reduce warm-up effects.
+/* ESP32 BLE Client (Secure Performance Test)
+   Scans for BLE peripherals advertising SERVICE_UUID and connects to the first match found.
+   For each communication round, the client builds an application-layer command requesting
+   temperature or humidity data. The request type is defined by REQUEST_OPTION or randomly
+   selected when configured.
+
+   All commands are encrypted and authenticated using AES-GCM at the application layer.
+   Each message includes a random nonce and a sequence number to ensure confidentiality,
+   integrity, and replay protection, independently of BLE pairing or bonding mechanisms.
+
+   After sending the encrypted request to CHARACTERISTIC_UUID, the client reads the encrypted
+   response from the server, validates the authentication tag, and decrypts the payload.
+   The response contains the sensor type, the measured value, and the corresponding sequence
+   number.
+
+   The elapsed time between sending the encrypted request and receiving the valid decrypted
+   response is measured in microseconds and stored for each round.
+   After NUM_ROUNDS executions, the client computes and prints average, minimum, and maximum
+   latency metrics, ignoring the first round to reduce warm-up effects.
+
+   This client is intended for evaluating both the security and performance impact of
+   application-layer encryption in BLE-based IoT communications on real ESP32 devices.
 */
+
 
 // Libraries necessary to AES encryption/decryption
 #include "crypto_aes_gcm.h"
 
+// AES Key: 4c7d9c0c22fa2cb06517f037b84996f2
 static const uint8_t AES128_KEY[16] = {
-  0x60,0x3d,0xeb,0x10,0x15,0xca,0x71,0xbe,0x2b,0x73,0xae,0xf0,0x85,0x7d,0x77,0x81
+    0x4c, 0x7d, 0x9c, 0x0c, 0x22, 0xfa, 0x2c, 0xb0,
+    0x65, 0x17, 0xf0, 0x37, 0xb8, 0x49, 0x96, 0xf2
 };
 
 #include <BLEDevice.h>
@@ -27,6 +45,9 @@ static const uint8_t AES128_KEY[16] = {
 #define ENABLE_INFORMATION_LOGS true
 // Set this constant to true if you want [ERROR] logs, otherwise set to false
 #define ENABLE_ERROR_LOGS true
+// Set this constant according wich option you want: 1 Request to the Server only temperature readings,
+// 2 Request to the Server only humidity readings, 3 Request to the Server randomly deciding between temperature or humidity readings for each round
+#define REQUEST_OPTION 3
 
 // Constants for Perfomance Metrics
 #define NUM_ROUNDS 20+1 // The first round is excluded from the average calculation to 
@@ -68,15 +89,58 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
   }
 };
 
-static bool sendEncryptedTemp(BLERemoteCharacteristic *ch) {
+static bool sendEncryptedCMD(BLERemoteCharacteristic *ch) {
   static uint32_t seq = 0;
-
-  // plaintext: "TEMP" + seq
   uint8_t pt[8];
-  pt[0] = 'T'; pt[1] = 'E'; pt[2] = 'M'; pt[3] = 'P';
-  memcpy(&pt[4], &seq, 4);
+  if (REQUEST_OPTION == 1){
+    // plaintext: "TEMP" + seq
+    pt[0] = 'T'; pt[1] = 'E'; pt[2] = 'M'; pt[3] = 'P';
+    memcpy(&pt[4], &seq, 4);
 
-  // nonce 12 bytes aleatorio
+    // Write the message TEMP to the Server (UTF-8 string)
+    std::string mensagem = "TEMP";
+    if (ENABLE_INFORMATION_LOGS){
+      Serial.print("[INFO] Sending: ");
+      Serial.println(mensagem.c_str());
+    }
+  } else if (REQUEST_OPTION == 2) {
+    // plaintext: "HUMD" + seq
+    pt[0] = 'H'; pt[1] = 'U'; pt[2] = 'M'; pt[3] = 'D';
+    memcpy(&pt[4], &seq, 4);
+
+    // Write the message HUMD to the Server (UTF-8 string)
+    std::string mensagem = "HUMD";
+    if (ENABLE_INFORMATION_LOGS){
+      Serial.print("[INFO] Sending: ");
+      Serial.println(mensagem.c_str());
+    }
+  } else if (REQUEST_OPTION == 3) {
+    if (esp_random() % 2){
+      // plaintext: "TEMP" + seq
+      pt[0] = 'T'; pt[1] = 'E'; pt[2] = 'M'; pt[3] = 'P';
+      memcpy(&pt[4], &seq, 4);
+
+      // Write the message TEMP to the Server (UTF-8 string)
+      std::string mensagem = "TEMP";
+      if (ENABLE_INFORMATION_LOGS){
+        Serial.print("[INFO] Sending: ");
+        Serial.println(mensagem.c_str());
+      }
+    } else {
+      // plaintext: "HUMD" + seq
+      pt[0] = 'H'; pt[1] = 'U'; pt[2] = 'M'; pt[3] = 'D';
+      memcpy(&pt[4], &seq, 4);
+
+      // Write the message HUMD to the Server (UTF-8 string)
+      std::string mensagem = "HUMD";
+      if (ENABLE_INFORMATION_LOGS){
+        Serial.print("[INFO] Sending: ");
+        Serial.println(mensagem.c_str());
+      }
+    }
+  }
+
+  // nonce - 12 random bytes -> 3 random unsigned integers
   uint8_t nonce[12];
   uint32_t r1 = (uint32_t)esp_random();
   uint32_t r2 = (uint32_t)esp_random();
@@ -85,15 +149,16 @@ static bool sendEncryptedTemp(BLERemoteCharacteristic *ch) {
   memcpy(&nonce[4], &r2, 4);
   memcpy(&nonce[8], &r3, 4);
 
-  uint8_t ct[sizeof(pt)];
+  uint8_t ct[sizeof(pt)]; // cypher text
   uint8_t tag[16];
 
+  // Encrypt plain text (pt), storing the result in ct array
   if (!aes_gcm_encrypt(AES128_KEY, nonce, pt, sizeof(pt), ct, tag)) {
     if (ENABLE_ERROR_LOGS) Serial.println("[ERROR] TEMP encrypt failed");
     return false;
   }
 
-  // payload: nonce + ct + tag
+  // payload = nonce(12) + ct(8) + tag(16)
   uint8_t out[12 + sizeof(ct) + 16]; // 36 bytes
   memcpy(out, nonce, 12);
   memcpy(out + 12, ct, sizeof(ct));
@@ -156,18 +221,11 @@ bool connectAndExchange() {
     pClient->disconnect();
     return false;
   }
-
-  // Write the message TEMP to the Server (UTF-8 string)
-  std::string mensagem = "TEMP";
-  if (ENABLE_INFORMATION_LOGS){
-    Serial.print("[INFO] Sending: ");
-    Serial.println(mensagem.c_str());
-  }
   
   //tStart = millis();
   tStart = micros();
 
-  if (!sendEncryptedTemp(pRemoteCharacteristic)) {
+  if (!sendEncryptedCMD(pRemoteCharacteristic)) {
     return false;
   }
   if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Message Sent");
@@ -177,22 +235,29 @@ bool connectAndExchange() {
 
   if (pRemoteCharacteristic->canRead()) {
     String rawStr = pRemoteCharacteristic->readValue();
-
     size_t len = rawStr.length();
-    if (len < (12 + 9 + 16)) {
-      if (ENABLE_ERROR_LOGS) Serial.println("[ERROR] Encrypted payload too small");
+    const size_t PAYLOAD_CT_LEN = 9; // Payload in Cypher Text length = type(1) + float(4) + seq(4)
+    const size_t MIN_LEN = AES_GCM_IV_SIZE + PAYLOAD_CT_LEN + AES_GCM_TAG_SIZE; // Minimum Length (37)
+    if (len < MIN_LEN) {
+      if (ENABLE_ERROR_LOGS) Serial.println("[ERROR] Encrypted payload received too small");
       return false;
     }
 
+    // Convert string into bytes (Get a pointer to the raw byte buffer)
     const uint8_t *buf = (const uint8_t *)rawStr.c_str();
 
+    // The first 12 bytes of the payload correspond to the AES-GCM nonce (IV).
     const uint8_t *nonce = buf;          // 12 bytes
-    const uint8_t *ct    = buf + 12;     // 9 bytes
-    const uint8_t *tag   = buf + 12 + 9; // 16 bytes
 
-    uint8_t pt[9];
+    // The ciphertext starts immediately after the nonce.
+    const uint8_t *ct  = buf + 12;     // 9 bytes
+    
+    // The authentication tag is located after the nonce and the ciphertext.
+    const uint8_t *tag = buf + 12 + 9; // 16 bytes
 
-    bool ok = aes_gcm_decrypt(AES128_KEY,nonce,ct,9,tag,pt);
+    uint8_t pt[PAYLOAD_CT_LEN]; // Plain text message received
+
+    bool ok = aes_gcm_decrypt(AES128_KEY,nonce,ct,9,tag,pt); // Decrypt cypher text storing plain text in pt
 
     if (!ok) {
       if (ENABLE_ERROR_LOGS)
@@ -200,6 +265,7 @@ bool connectAndExchange() {
       return false;
     }
 
+    // Convert from raw bytes to type and float 
     uint8_t type = pt[0];
     float value;
     uint32_t seq;
@@ -228,6 +294,10 @@ bool connectAndExchange() {
 
 void setup() {
   Serial.begin(115200);
+  if (!(REQUEST_OPTION == 1 || REQUEST_OPTION == 2 || REQUEST_OPTION == 3)){
+    if (ENABLE_ERROR_LOGS) Serial.println("[ERROR] REQUEST_OPTION must be 1,2 or 3");
+    while (true); // Block execution to this line
+  }
   if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Initializing BLE Client...");
 
   BLEDevice::init("BLE_Client_Test");
