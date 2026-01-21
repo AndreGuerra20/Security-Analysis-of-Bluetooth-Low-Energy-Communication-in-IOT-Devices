@@ -1,12 +1,22 @@
-/* ESP32 BLE Client (Performance Test)
-   Scans for BLE peripherals advertising SERVICE_UUID and connects to the first match.
-   For each round, it writes the command "TEMP" or "HUMD" to CHARACTERISTIC_UUID, then reads back
-   the server response (expected to be a UTF-8 string, e.g., a temperature value).
-   The elapsed time between write and read is measured in microseconds and stored.
-   After NUM_ROUNDS rounds, it prints average, min, and max metrics, ignoring the first
-   round to reduce warm-up effects.
-*/
-
+/* ESP32 BLE Client (Secure Performance Test)
+ *
+ * Scans for BLE devices advertising SERVICE_UUID and connects to the first match.
+ *
+ * Security:
+ * - BLE LE Security Mode 1, Level 4
+ * - Authenticated pairing with MITM protection
+ * - LE Secure Connections (SC)
+ * - Encrypted link enforced via secureConnection()
+ *
+ * For each communication round:
+ * - Establishes a secure BLE connection with the server.
+ * - Writes the command "TEMP" to CHARACTERISTIC_UUID.
+ * - Reads the server response (UTF-8 sensor value).
+ * - Measures the elapsed time between write and read.
+ *
+ * After NUM_ROUNDS, average, minimum, and maximum latency metrics are printed
+ * (the first round is ignored to reduce warm-up effects).
+ */
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEScan.h>
@@ -17,8 +27,8 @@
 #include <esp_gap_ble_api.h>
 static const uint32_t STATIC_PASSKEY = 195374; // 6 digits
 
-#define SERVICE_UUID        "dc1480ed-8d8f-4435-b083-c3c08f586a5e"
-#define CHARACTERISTIC_UUID "19e6651d-68e6-4090-85bb-6c5a3bdcd858"
+#define SERVICE_UUID        "1714cc76-6a69-4d96-a7ca-3811e1868f4b"
+#define CHARACTERISTIC_UUID "2d7c17eb-9f22-4b87-9172-5a95e158d6c7"
 
 // Set this constant to true if you want [INFO] logs, otherwise set to false
 #define ENABLE_INFORMATION_LOGS true

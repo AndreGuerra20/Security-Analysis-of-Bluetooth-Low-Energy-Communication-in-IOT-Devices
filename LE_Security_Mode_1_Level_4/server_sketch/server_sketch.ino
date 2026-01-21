@@ -1,15 +1,20 @@
-/* ESP32 BLE Server (BME280 Request/Response)
-   Advertises SERVICE_UUID and exposes a GATT characteristic (CHARACTERISTIC_UUID)
-   with READ, WRITE, WRITE_NR, and NOTIFY properties.
-
-   When a client writes a command to the characteristic:
-   - "TEMP": reads temperature from the BME280 sensor, formats it as a UTF-8 string
-             (e.g., "19.64"), stores it in the characteristic value, and sends it via NOTIFY.
-   - "HUMD":  reads humidity from the BME280 sensor and replies in the same way.
-
-   The server automatically restarts advertising after a client disconnects, allowing
-   multiple sequential client connections. A periodic heartbeat log is printed every 5 seconds.
-*/
+/* ESP32 BLE Server (Secure BME280 Request/Response)
+ *
+ * Advertises SERVICE_UUID and exposes a GATT characteristic (CHARACTERISTIC_UUID)
+ * with READ, WRITE, and NOTIFY properties.
+ *
+ * Security:
+ * - BLE LE Security Mode 1, Level 4
+ * - Authenticated pairing with MITM protection
+ * - LE Secure Connections (SC)
+ * - Encrypted link with bonding and static passkey
+ *
+ * When a client writes a command to the characteristic:
+ * - "TEMP": reads temperature from the BME280 sensor and replies via NOTIFY.
+ * - "HUMD": reads humidity from the BME280 sensor and replies via NOTIFY.
+ *
+ * The server restarts advertising automatically after client disconnection.
+ */
 
 // Libraries necessary to BME280 Sensor
 #include <Wire.h>
@@ -25,13 +30,13 @@ Adafruit_BME280 bme;
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-// 
+// Security Libraries
 #include <BLESecurity.h>
 #include <esp_gap_ble_api.h>
 static const uint32_t STATIC_PASSKEY = 195374; // 6 digits
 
-#define SERVICE_UUID        "dc1480ed-8d8f-4435-b083-c3c08f586a5e"
-#define CHARACTERISTIC_UUID "19e6651d-68e6-4090-85bb-6c5a3bdcd858"
+#define SERVICE_UUID        "1714cc76-6a69-4d96-a7ca-3811e1868f4b"
+#define CHARACTERISTIC_UUID "2d7c17eb-9f22-4b87-9172-5a95e158d6c7"
 
 // Set this constant to true if you want [INFO] logs, otherwise set to false
 #define ENABLE_INFORMATION_LOGS true
@@ -113,7 +118,7 @@ static BLEServer* initBLEDeviceAndServer(const char* deviceName) {
   
   esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(uint32_t));
   esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
-  esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));*/
+  esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t)); */
 
   BLEServer *server = BLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
@@ -129,10 +134,10 @@ static void setupCharacteristic(BLEService *service, const char* charUuid) {
     BLECharacteristic::PROPERTY_NOTIFY
   );
   /* SECURITY NOTE: Using ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE instead of 
-   * ESP_GATT_PERM_READ_ENCRYPTED | ESP_GATT_PERM_WRITE_ENCRYPTED.
+   * ESP_GATT_PERM_READ_ENCRYPTED | ESP_GATT_PERM_WRITE_ENCRYPTED because there is a bug that the connection was established but never traded messages (no output on both sides)
    * 
    * This does NOT reduce security because:
-   * 1. The BLE connection is already encrypted at the link layer via secureConnection()
+   * 1. The BLE connection is already encrypted at the link layer via secureConnection() in the client side
    * 2. MITM protection is enforced through passkey authentication
    * 3. Secure Connections (SC) using ECC P-256 is active
    * 4. All data transmitted is encrypted regardless of GATT-level permissions
