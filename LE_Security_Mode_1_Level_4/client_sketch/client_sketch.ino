@@ -81,9 +81,9 @@ void printMetrics() {
 
   Serial.println("\n--- BLE Performance Metrics ---");
   Serial.print("Rounds: "); Serial.println(NUM_ROUNDS - 1);
-  Serial.print("Average: "); Serial.print(avg); Serial.println(" μs");
-  Serial.print("Minimum: "); Serial.print(minT); Serial.println(" μs");
-  Serial.print("Maximum: "); Serial.print(maxT); Serial.println(" μs");
+  Serial.print("Average: "); Serial.print(avg); Serial.println(" ms");
+  Serial.print("Minimum: "); Serial.print(minT); Serial.println(" ms");
+  Serial.print("Maximum: "); Serial.print(maxT); Serial.println(" ms");
 }
 
 
@@ -131,8 +131,8 @@ bool connectAndExchange() {
     Serial.println(mensagem.c_str());
   }
   
-  //tStart = millis();
-  tStart = micros();
+  tStart = millis();
+  //tStart = micros();
 
   pRemoteCharacteristic->writeValue((uint8_t*)mensagem.data(), mensagem.length(), true);
   if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Message Sent");
@@ -148,8 +148,8 @@ bool connectAndExchange() {
     }
   }
 
-  //tEnd = millis();
-  tEnd = micros();
+  tEnd = millis();
+  //tEnd = micros();
   pClient->disconnect();
   roundTimes[currentRound] = tEnd - tStart;
 
@@ -197,7 +197,7 @@ void loop() {
         Serial.print(currentRound);
         Serial.print(" time: ");
         Serial.print(roundTimes[currentRound]);
-        Serial.println(" μs");
+        Serial.println(" ms");
       }
       currentRound++;
     }

@@ -77,9 +77,9 @@ void printMetrics() {
 
   Serial.println("\n--- BLE Performance Metrics ---");
   Serial.print("Rounds: "); Serial.println(NUM_ROUNDS - 1);
-  Serial.print("Average: "); Serial.print(avg); Serial.println(" μs");
-  Serial.print("Minimum: "); Serial.print(minT); Serial.println(" μs");
-  Serial.print("Maximum: "); Serial.print(maxT); Serial.println(" μs");
+  Serial.print("Average: "); Serial.print(avg); Serial.println(" ms");
+  Serial.print("Minimum: "); Serial.print(minT); Serial.println(" ms");
+  Serial.print("Maximum: "); Serial.print(maxT); Serial.println(" ms");
 }
 
 
@@ -113,14 +113,14 @@ bool connectAndExchange() {
   }
 
   // Write the message TEMP to the Server (UTF-8 string)
-  std::string mensagem = "HUMD";
+  std::string mensagem = "TEMP";
   if (ENABLE_INFORMATION_LOGS){
     Serial.print("[INFO] Sending: ");
     Serial.println(mensagem.c_str());
   }
   
-  //tStart = millis();
-  tStart = micros();
+  tStart = millis();
+  //tStart = micros();
 
   pRemoteCharacteristic->writeValue((uint8_t*)mensagem.data(), mensagem.length(), false);
   if(ENABLE_INFORMATION_LOGS) Serial.println("[INFO] Message Sent");
@@ -134,8 +134,8 @@ bool connectAndExchange() {
     Serial.println(value.c_str());
   }
 
-  //tEnd = millis();
-  tEnd = micros();
+  tEnd = millis();
+  //tEnd = micros();
   pClient->disconnect();
   roundTimes[currentRound] = tEnd - tStart;
 
@@ -170,7 +170,7 @@ void loop() {
         Serial.print(currentRound);
         Serial.print(" time: ");
         Serial.print(roundTimes[currentRound]);
-        Serial.println(" μs");
+        Serial.println(" ms");
       }
       currentRound++;
     }
